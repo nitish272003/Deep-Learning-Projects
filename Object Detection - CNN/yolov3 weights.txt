@@ -1,0 +1,3 @@
+Use this Kaggle link to download Yolov3 weights
+
+Link: https://www.kaggle.com/datasets/shivam316/yolov3-weights
