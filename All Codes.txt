@@ -1,0 +1,795 @@
+Ex2: Apply convolutional neural network for an image classification task.
+(CNN_img_classification02)
+
+import tensorflow as tf
+from tensorflow.keras import layers, models
+from tensorflow.keras.datasets import cifar10
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Load and preprocess CIFAR-10 data
+(x_train, y_train), (x_test, y_test) = cifar10.load_data()
+x_train, x_test = x_train / 255.0, x_test / 255.0
+print(f"x_train shape:{x_train.shape}")
+print(f"y_train shape:{y_train.shape}")
+print(f"x_test shape:{x_test.shape}")
+print(f"y_test shape:{y_test.shape}")
+# Display sample image
+plt.imshow(x_train[6])
+plt.title(f'Label: {y_train[6][0]}')
+def plot_images_by_class(images, labels, class_names, num_classes=10):
+    # Create a dictionary to store one example per class
+    class_examples = {}
+    for i, label in enumerate(labels):
+        label_idx = label[0]
+        # Store the first occurrence of each class
+        if label_idx not in class_examples:
+            class_examples[label_idx] = images[i]
+        # Stop if we have one example for each class
+        if len(class_examples) == num_classes:
+            break
+    
+    # Plot each class
+    plt.figure(figsize=(10, 10))
+    for i, (label_idx, img) in enumerate(class_examples.items()):
+        plt.subplot(3, 4, i + 1)
+        plt.imshow(img)
+        plt.title(class_names[label_idx])
+        plt.axis('off')
+    plt.show()
+
+plot_images_by_class(x_train, y_train, class_names)
+
+# Define CNN model
+model = models.Sequential([
+    layers.Conv2D(32, (3,3), activation='relu', input_shape=(32,32,3)),
+    layers.MaxPooling2D((2,2)),
+    layers.Conv2D(64, (3,3), activation='relu'),
+    layers.MaxPooling2D((2,2)),
+    layers.Conv2D(64, (3,3), activation='relu'),
+    layers.Flatten(),
+    layers.Dense(64, activation='relu'),
+    layers.Dense(10, activation='softmax')
+])
+# Compile and train model
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+history = model.fit(x_train, y_train, epochs=20, validation_data=(x_test, y_test))
+
+# Plot accuracy and loss
+for metric in ['accuracy', 'loss']:
+    plt.plot(history.history[metric], label=f'Train {metric}')
+    plt.plot(history.history[f'val_{metric}'], label=f'Val {metric}')
+    plt.title(f'Model {metric.capitalize()}')
+    plt.xlabel('Epoch')
+    plt.ylabel(metric.capitalize())
+    plt.legend(loc='upper left')
+    plt.show()
+
+
+from sklearn.metrics import classification_report, confusion_matrix
+import seaborn as sns
+
+# Evaluate the model on the test set
+test_loss, test_accuracy = model.evaluate(x_test, y_test, verbose=0)
+print(f"Test Accuracy: {test_accuracy*100:.2f}%")
+print(f"Test Loss: {test_loss:.4f}")
+
+# Generate predictions and calculate confusion matrix
+y_pred = model.predict(x_test)
+y_pred_classes = np.argmax(y_pred, axis=1)
+y_true = y_test.flatten()  # Flatten y_test to match the shape of y_pred_classes
+
+# Confusion Matrix
+conf_matrix = confusion_matrix(y_true, y_pred_classes)
+plt.figure(figsize=(10, 8))
+sns.heatmap(conf_matrix, annot=True, fmt="d", cmap="Blues", xticklabels=class_names, yticklabels=class_names)
+plt.xlabel("Predicted Labels")
+plt.ylabel("True Labels")
+plt.title("Confusion Matrix")
+plt.show()
+
+# Classification Report
+print("Classification Report:\n")
+print(classification_report(y_true, y_pred_classes, target_names=class_names))
+
+
+================================================================================================================================
+EX 3: Construct a multiscale object detector using convolutional neural network.
+(Objectdetector_cnn03)
+
+
+import cv2
+import numpy as np
+from matplotlib import pyplot as plt
+import time
+from tabulate import tabulate
+
+# Load image, classes, and YOLO model
+img = cv2.imread(r'D:\sem3\DL\test\happy-dog.jpg')
+with open(r'D:\sem3\DL\test\coco.names', 'r') as f:
+    classes = f.read().strip().split('\n')
+colors = np.random.randint(0, 255, size=(len(classes), 3), dtype='uint8')
+
+# Load YOLO model (make sure you download yolov3.cfg and yolov3.weights)
+cfg_path = r'yolov3.cfg'  # Path to yolov3.cfg
+weights_path = r'D:\sem3\DL\test\yolov3.weights'  # Path to yolov3.weights
+net = cv2.dnn.readNetFromDarknet(cfg_path, weights_path)
+
+# Perform inference
+net.setInput(cv2.dnn.blobFromImage(img, 1/255.0, (416, 416), swapRB=True, crop=False))
+start = time.time()
+outputs = net.forward(net.getUnconnectedOutLayersNames())
+inference_time = time.time() - start
+
+# Process detections
+h, w = img.shape[:2]
+boxes, confidences, classIDs = [], [], []
+for output in outputs:
+    for detection in output:
+        scores = detection[5:]
+        classID, confidence = np.argmax(scores), scores[np.argmax(scores)]
+        if confidence > 0.5:
+            box = detection[:4] * [w, h, w, h]
+            boxes.append([int(box[0] - box[2] / 2), int(box[1] - box[3] / 2), int(box[2]), int(box[3])])
+            confidences.append(float(confidence))
+            classIDs.append(classID)
+
+# Apply NMS and draw boxes
+detections_count = 0
+total_confidence = 0
+for i in cv2.dnn.NMSBoxes(boxes, confidences, 0.5, 0.4).flatten():
+    x, y, width, height = boxes[i]
+    color = [int(c) for c in colors[classIDs[i]]]
+    cv2.rectangle(img, (x, y), (x + width, y + height), color, 2)
+    cv2.putText(img, f"{classes[classIDs[i]]}: {confidences[i]:.2f}", (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+    
+    # Collect metrics
+    detections_count += 1
+    total_confidence += confidences[i]
+
+# Calculate average confidence
+average_confidence = total_confidence / detections_count if detections_count > 0 else 0
+
+# Print performance metrics
+metrics = [
+    ["Inference Time (s)", f"{inference_time:.2f}"],
+    ["Number of Detections", detections_count],
+    ["Average Confidence", f"{average_confidence:.2f}"]
+]
+
+print(tabulate(metrics, headers=["Metric", "Value"], tablefmt="fancy_grid"))
+
+# Show result
+plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+plt.axis('off')
+plt.show()
+
+================================================================================================================================
+Ex: 4 Develop an image segmentation model using a fully convolutional network.
+(img_segmentation_fullyCNN04)
+
+import os
+import numpy as np
+import tensorflow as tf
+import matplotlib.pyplot as plt
+from tensorflow.keras import layers, models
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
+from tensorflow.keras.utils import to_categorical
+from sklearn.model_selection import train_test_split
+
+# Paths to your dataset
+original_images_path = '/content/original'  # Folder with original images
+mask_images_path = '/content/mask'         # Folder with mask images
+
+# Function to load and preprocess images
+def load_images(original_path, mask_path, img_size=(128, 128)):
+    original_images = []
+    mask_images = []
+
+    original_files = sorted(os.listdir(original_path))
+    mask_files = sorted(os.listdir(mask_path))
+
+    for orig_file, mask_file in zip(original_files, mask_files):
+        # Load the image and mask
+        orig_img = load_img(os.path.join(original_path, orig_file), target_size=img_size)
+        mask_img = load_img(os.path.join(mask_path, mask_file), target_size=img_size, color_mode='grayscale')
+
+        # Convert to numpy arrays
+        orig_img = img_to_array(orig_img) / 255.0  # Normalize original image
+        mask_img = img_to_array(mask_img) / 255.0  # Normalize mask (binary values)
+
+        # Append to list
+        original_images.append(orig_img)
+        mask_images.append(mask_img)
+
+    # Convert lists to numpy arrays
+    original_images = np.array(original_images)
+    mask_images = np.array(mask_images)
+
+    # Ensure mask images are binary (0 or 1)
+    mask_images = np.where(mask_images > 0.5, 1, 0)
+
+    return original_images, mask_images
+
+# Load the images
+X, y = load_images(original_images_path, mask_images_path)
+
+# Split the data into training and validation sets
+X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Define the Fully Convolutional Network (FCN) Model
+def create_fcn(input_shape=(128, 128, 3)):
+    inputs = layers.Input(shape=input_shape)
+
+    # Encoder: Conv blocks
+    x = layers.Conv2D(64, (3, 3), padding='same', activation='relu')(inputs)
+    x = layers.MaxPooling2D((2, 2))(x)
+    x = layers.Conv2D(128, (3, 3), padding='same', activation='relu')(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    # Decoder: Upsampling with transposed convolutions
+    x = layers.Conv2DTranspose(128, (3, 3), strides=(2, 2), padding='same', activation='relu')(x)
+    x = layers.Conv2DTranspose(64, (3, 3), strides=(2, 2), padding='same', activation='relu')(x)
+
+    # Output layer: Sigmoid activation for binary classification (0 or 1)
+    output = layers.Conv2D(1, (1, 1), activation='sigmoid')(x)
+
+    # Create model
+    model = models.Model(inputs, output)
+
+    return model
+
+# Create the FCN model
+model = create_fcn()
+
+# Compile the model
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+
+# Train the model
+history = model.fit(X_train, y_train, epochs=30, batch_size=4, validation_data=(X_val, y_val))
+
+
+
+
+# Evaluate the model
+val_loss, val_accuracy = model.evaluate(X_val, y_val)
+print(f'Validation Loss: {val_loss}')
+print(f'Validation Accuracy: {val_accuracy}')
+
+import matplotlib.pyplot as plt
+# Plot loss
+plt.figure(figsize=(12, 4))
+plt.plot(history.history['loss'], label='Train Loss')
+plt.plot(history.history['val_loss'], label='Validation Loss')
+plt.title('Model Loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+plt.show()
+
+
+
+# Function to perform edge detection (e.g., using Sobel filter or Canny edge detection)
+def edge_detection(mask):
+    # Convert the mask to uint8 (required for edge detection)
+    mask = (mask * 255).astype(np.uint8)
+
+    # Apply Sobel edge detection
+    sobel_x = cv2.Sobel(mask, cv2.CV_64F, 1, 0, ksize=3)
+    sobel_y = cv2.Sobel(mask, cv2.CV_64F, 0, 1, ksize=3)
+    sobel_edge = np.hypot(sobel_x, sobel_y)  # Combine both Sobel axes
+
+    # Normalize to 0-1 range
+    sobel_edge = np.uint8(np.clip(sobel_edge, 0, 255))
+    sobel_edge = sobel_edge / 255.0
+
+    return sobel_edge
+
+# Visualize a prediction with edge-detection outline
+def visualize_prediction(model, img_path):
+    # Load the specific image
+    img = load_img(img_path, target_size=(128, 128))  # Resize if needed
+    img = img_to_array(img) / 255.0  # Normalize the image
+
+    # Make a prediction
+    pred_mask = model.predict(np.expand_dims(img, axis=0))[0]
+
+    # Apply edge detection on the predicted mask
+    outlined_mask = edge_detection(pred_mask)
+
+
+    # Plot original image and edge-detected predicted mask
+    plt.figure(figsize=(12, 4))
+    plt.subplot(1, 2, 1)
+    plt.title('Original Image (download.jpg)')
+    plt.imshow(img)
+
+    plt.subplot(1, 2, 2)
+    plt.title('Predicted Mask (Edge Outline)')
+    plt.imshow(outlined_mask.squeeze(), cmap='gray')
+
+    plt.show()
+
+# Specify the path for the image
+img_path = '/content/1.jpg'  # Path to the download.jpg image
+
+# Visualize the prediction for the specific image with edge outline
+visualize_prediction(model, img_path)
+
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
+
+# Function to apply colorful overlay on the predicted mask
+def colorful_overlay(mask, img):
+    # Normalize the mask to the range [0, 1]
+    mask = np.clip(mask, 0, 1)
+
+    # Convert the mask to a 3-channel image with colors based on intensity
+    mask_colored = cv2.applyColorMap((mask * 255).astype(np.uint8), cv2.COLORMAP_SPRING)
+
+    # Blend the mask with the original image for a colorful overlay
+    overlay = cv2.addWeighted(img, 0.7, mask_colored, 0.3, 0)
+
+    return overlay
+
+# Visualize a prediction with colorful overlay
+def visualize_prediction(model, img_path):
+    # Load the specific image
+    img = load_img(img_path, target_size=(128, 128))  # Resize if needed
+    img = img_to_array(img) / 255.0  # Normalize the image
+
+    # Make a prediction
+    pred_mask = model.predict(np.expand_dims(img, axis=0))[0]
+
+    # Apply colorful overlay to the predicted mask
+    overlay_mask = colorful_overlay(pred_mask, (img * 255).astype(np.uint8))
+
+    # Plot original image and overlayed predicted mask
+    plt.figure(figsize=(12, 4))
+    plt.subplot(1, 2, 1)
+    plt.title('Original Image (download.jpg)')
+    plt.imshow(img)
+
+    plt.subplot(1, 2, 2)
+    plt.title('Predicted Mask (Colorful Overlay)')
+    plt.imshow(overlay_mask)
+
+    plt.show()
+
+# Specify the path for the image
+img_path = '/content/1.jpg'  # Path to the download.jpg image
+
+# Visualize the prediction for the specific image with colorful overlay
+visualize_prediction(model, img_path)
+
+
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
+
+# Visualize a prediction for a specific image (without true mask)
+def visualize_prediction(model, img_path):
+    # Load the specific image
+    img = load_img(img_path, target_size=(128, 128))  # Resize if needed
+    img = img_to_array(img) / 255.0  # Normalize the image
+
+    # Make a prediction
+    pred_mask = model.predict(np.expand_dims(img, axis=0))[0]
+
+    # Plot original image and predicted mask
+    plt.figure(figsize=(12, 4))
+    plt.subplot(1, 2, 1)
+    plt.title('Original Image (download.jpg)')
+    plt.imshow(img)
+
+    plt.subplot(1, 2, 2)
+    plt.title('Predicted Mask')
+    plt.imshow(pred_mask.squeeze(), cmap='gray')
+
+    plt.show()
+
+# Specify the path for the image
+img_path = '/content/1.jpg'  # Path to the download.jpg image
+
+# Visualize the prediction for the specific image
+visualize_prediction(model, img_path)
+
+
+================================================================================================================================
+Ex 6: Design an LSTM-based speech/handwriting recognition model.
+(LSTM handwriting)
+
+import tensorflow as tf
+from tensorflow import keras
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sn
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.datasets import mnist
+from sklearn.metrics import classification_report
+from tabulate import tabulate
+
+# Load and preprocess data
+(x_train, y_train), (x_test, y_test) = mnist.load_data()
+x_train, x_test = x_train / 255.0, x_test / 255.0
+
+# Reshape data to fit LSTM input shape
+timesteps, input_dim = x_train.shape[1], x_train.shape[2]
+x_train = x_train.reshape(-1, timesteps, input_dim)
+x_test = x_test.reshape(-1, timesteps, input_dim)
+
+# Build and compile the LSTM model
+model = Sequential([
+    LSTM(128, activation='relu', input_shape=(timesteps, input_dim)),
+    Dense(10, activation='softmax')
+])
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+
+# Train the model
+model.fit(x_train, y_train, epochs=10, batch_size=32, validation_split=0.2)
+
+# Evaluate and predict
+model.evaluate(x_test, y_test)
+y_predicted = model.predict(x_test)
+y_predicted_labels = [np.argmax(i) for i in y_predicted]
+
+# Classification report for detailed metrics
+report = classification_report(y_test, y_predicted_labels, output_dict=True)
+
+# Prepare metrics table
+metrics_table = [
+    ["Accuracy", report["accuracy"]],
+    ["Weighted Precision", report["weighted avg"]["precision"]],
+    ["Weighted Recall", report["weighted avg"]["recall"]],
+    ["Weighted F1-Score", report["weighted avg"]["f1-score"]]
+]
+
+# Display the metrics table
+print(tabulate(metrics_table, headers=["Metric", "Value"], tablefmt="fancy_grid"))
+
+# Visualize a sample test image and its prediction
+index = 1  # Change the index to view other test images
+plt.matshow(x_test[index].reshape(28, 28))  # Reshape back to original image dimensions
+plt.title(f"Predicted: {y_predicted_labels[index]}, Actual: {y_test[index]}")
+plt.show()
+
+# Confusion matrix
+cm = tf.math.confusion_matrix(labels=y_test, predictions=y_predicted_labels)
+plt.figure(figsize=(10, 7))
+sn.heatmap(cm, annot=True, fmt='d')
+plt.xlabel('Predicted')
+plt.ylabel('Truth')
+plt.show()
+
+
+================================================================================================================================
+
+Ex 7 Compare the performance of RNN, LSTM, and GRU in forecasting and predicting time series data.
+( rnn,lstm,gru_forecasting07)
+
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.preprocessing.sequence import TimeseriesGenerator
+
+# Load and preprocess data
+df = pd.read_csv("/content/monthly-milk-production-pounds.csv", index_col='Month', parse_dates=True)
+df.index.freq = 'MS'
+scaler = MinMaxScaler()
+train, test = scaler.fit_transform(df.iloc[:-12]), scaler.transform(df.iloc[-12:])
+
+# Create TimeseriesGenerator
+gen = TimeseriesGenerator(train, train, length=12, batch_size=1)
+
+RNN
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import SimpleRNN, Dense
+
+model = Sequential([SimpleRNN(200, activation='relu', input_shape=(12, 1)), Dense(1)])
+model.compile(optimizer='adam', loss='mse')
+model.fit(gen, epochs=50)
+
+LSTM
+from tensorflow.keras.layers import LSTM
+
+model = Sequential([LSTM(200, activation='relu', input_shape=(12, 1)), Dense(1)])
+model.compile(optimizer='adam', loss='mse')
+model.fit(gen, epochs=50)
+
+GRU
+from tensorflow.keras.layers import GRU
+
+model = Sequential([GRU(200, activation='relu', input_shape=(12, 1)), Dense(1)])
+model.compile(optimizer='adam', loss='mse')
+model.fit(gen, epochs=50)
+
+
+# Predicting future values
+preds = []
+current_batch = train[-12:].reshape(1, 12, 1)
+for _ in range(len(test)):
+    pred = model.predict(current_batch)[0]
+    preds.append(pred)
+    current_batch = np.append(current_batch[:, 1:, :], [[pred]], axis=1)
+
+# Inverse transform predictions
+preds = scaler.inverse_transform(preds).astype(int)
+
+# Plot
+df_test = df.iloc[-12:]
+df_test['Predictions'] = preds
+plt.plot(df.index, df['production'], label='Train')
+plt.plot(df_test.index, df_test['production'], label='Test')
+plt.plot(df_test.index, df_test['Predictions'], label='Predicted')
+plt.legend()
+plt.show()
+
+
+
+
+================================================================================================================================
+Ex 8 Demonstrate the use of Autoencoder for dimensionality reduction and image reconstruction.
+(Autoencoder_dim_reduction08)
+
+import numpy as np
+import matplotlib.pyplot as plt
+from tensorflow.keras.datasets import mnist
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Dense
+from tensorflow.keras.optimizers import Adam
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+from sklearn.metrics import r2_score
+from sklearn.metrics.pairwise import cosine_similarity
+from skimage.metrics import structural_similarity as ssim
+from math import log10
+from tabulate import tabulate
+
+# Load and preprocess data
+(x_train, _), (x_test, _) = mnist.load_data()
+x_train, x_test = x_train.reshape(-1, 784) / 255.0, x_test.reshape(-1, 784) / 255.0
+
+# Build autoencoder model
+input_img = Input(shape=(784,))
+encoded = Dense(128, activation='relu')(input_img)
+encoded = Dense(64, activation='relu')(encoded)
+encoded = Dense(32, activation='relu')(encoded)
+decoded = Dense(64, activation='relu')(encoded)
+decoded = Dense(128, activation='relu')(decoded)
+decoded = Dense(784, activation='sigmoid')(decoded)
+autoencoder = Model(input_img, decoded)
+encoder = Model(input_img, encoded)
+autoencoder.compile(optimizer=Adam(), loss='binary_crossentropy')
+
+# Train the model
+autoencoder.fit(x_train, x_train, epochs=50, batch_size=256, validation_data=(x_test, x_test))
+
+# Get the reconstructed images
+reconstructed = autoencoder.predict(x_test)
+
+# Compute performance metrics
+mse = mean_squared_error(x_test, reconstructed)
+mae = mean_absolute_error(x_test, reconstructed)
+rmse = np.sqrt(mse)
+r2 = r2_score(x_test, reconstructed)
+cos_sim = cosine_similarity(x_test, reconstructed)
+ssim_value = np.mean([ssim(x_test[i].reshape(28, 28), reconstructed[i].reshape(28, 28), data_range=1) for i in range(x_test.shape[0])])
+psnr_value = np.mean([10 * log10(1 / mean_squared_error(x_test[i], reconstructed[i])) for i in range(x_test.shape[0])])
+
+# Prepare the metrics table
+metrics_table = [
+    ["Mean Squared Error (MSE)", mse],
+    ["Mean Absolute Error (MAE)", mae],
+    ["Root Mean Squared Error (RMSE)", rmse],
+    ["R-Squared (R²)", r2],
+    ["Cosine Similarity", np.mean(cos_sim)],
+    ["Structural Similarity Index (SSIM)", ssim_value],
+    ["Peak Signal-to-Noise Ratio (PSNR)", psnr_value]
+]
+
+# Display the metrics table
+print(tabulate(metrics_table, headers=["Metric", "Value"], tablefmt="fancy_grid"))
+
+# Visualization of original, reconstructed, and encoded images
+indices = np.random.randint(0, x_test.shape[0], 10)
+selected_images = x_test[indices]
+reconstructed_images = autoencoder.predict(selected_images)
+encoded_imgs = encoder.predict(selected_images)
+
+# Plot the images
+plt.figure(figsize=(18, 6))
+for i in range(10):
+    # Display original images
+    plt.subplot(3, 10, i + 1)
+    plt.imshow(selected_images[i].reshape(28, 28), cmap='gray')
+    plt.axis('off')
+    
+    # Display reconstructed images
+    plt.subplot(3, 10, i + 11)
+    plt.imshow(reconstructed_images[i].reshape(28, 28), cmap='gray')
+    plt.axis('off')
+    
+    # Display encoded images (bars or scatter plot)
+    plt.subplot(3, 10, i + 21)
+    if encoded_imgs.shape[1] > 2:
+        plt.bar(range(32), encoded_imgs[i])  # Plot bars for high dimensional encoding
+    else:
+        plt.scatter(encoded_imgs[i, 0], encoded_imgs[i, 1])  # Scatter plot for 2D encoding
+    plt.axis('off')
+    
+plt.show()
+
+
+
+
+================================================================================================================================
+
+Ex 9: Add noise to a sample image dataset and apply the Autoencoder for denoising images.
+(denoising_reconstruct_autoencoder09)
+import numpy as np
+import matplotlib.pyplot as plt
+from keras.models import Sequential
+from keras.layers import Dense
+from keras.datasets import mnist
+from keras import metrics
+
+# Load and preprocess data
+(X_train, _), (X_test, _) = mnist.load_data()
+X_train, X_test = X_train.reshape(-1, 784) / 255.0, X_test.reshape(-1, 784) / 255.0
+noise_factor = 0.2
+x_train_noisy = np.clip(X_train + noise_factor * np.random.normal(0, 1, X_train.shape), 0, 1)
+x_test_noisy = np.clip(X_test + noise_factor * np.random.normal(0, 1, X_test.shape), 0, 1)
+
+# Build and train model
+model = Sequential([Dense(500, input_dim=784, activation='relu'),
+                    Dense(300, activation='relu'),
+                    Dense(100, activation='relu'),
+                    Dense(300, activation='relu'),
+                    Dense(500, activation='relu'),
+                    Dense(784, activation='sigmoid')])
+model.compile(loss='mean_squared_error', optimizer='adam', metrics=['mean_squared_error', 'mean_absolute_error'])
+history = model.fit(x_train_noisy, X_train, validation_data=(x_test_noisy, X_test), epochs=10, batch_size=200, verbose=2)
+
+# Predict and reshape for visualization
+pred = model.predict(x_test_noisy).reshape(-1, 28, 28) * 255
+X_test = X_test.reshape(-1, 28, 28) * 255
+x_test_noisy = x_test_noisy.reshape(-1, 28, 28) * 255
+
+# Plot functions for loss, MAE, and images
+def plot_loss(history):
+    plt.figure(figsize=(8, 6))
+    plt.plot(history.history['loss'], label='Training Loss')
+    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.title('Model Loss (MSE)')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.show()
+
+def plot_images(images, title, start_idx=10, end_idx=20):
+    plt.figure(figsize=(20, 4))
+    print(title)
+    for i in range(start_idx, end_idx):
+        plt.subplot(2, 10, i+1)
+        plt.imshow(images[i], cmap='gray')
+        plt.title(f"(Label: {i})")
+    plt.show()
+
+# Plot loss, MAE, and images
+plot_loss(history)
+plot_images(X_test, "Test Images")
+plot_images(x_test_noisy, "Test Images with Noise")
+plot_images(pred, "Reconstruction of Noisy Test Images")
+
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, median_absolute_error, mean_absolute_percentage_error, explained_variance_score
+import numpy as np
+import pandas as pd
+
+# Predictions and actual values (flattened for metric calculations)
+y_true = X_test.reshape(X_test.shape[0], -1) / 255.0  # Scale back to [0, 1] range
+y_pred = pred.reshape(pred.shape[0], -1) / 255.0      # Scale back to [0, 1] range
+
+# Compute metrics
+mse = mean_squared_error(y_true, y_pred)
+mae = mean_absolute_error(y_true, y_pred)
+rmse = np.sqrt(mse)
+r2 = r2_score(y_true, y_pred)
+medae = median_absolute_error(y_true, y_pred)
+mape = mean_absolute_percentage_error(y_true, y_pred)
+evs = explained_variance_score(y_true, y_pred)
+
+# Create a DataFrame for metrics
+metrics_df = pd.DataFrame({
+    'Metric': ['Mean Squared Error', 'Mean Absolute Error', 'Root Mean Squared Error', 
+               'R-squared', 'Median Absolute Error', 'Mean Absolute Percentage Error', 
+               'Explained Variance Score'],
+    'Value': [mse, mae, rmse, r2, medae, mape, evs]
+})
+
+# Optionally, for a better display format (in Jupyter environments)
+from IPython.display import display
+display(metrics_df.style.set_caption("Model Performance Metrics").set_table_styles(
+    [{'selector': 'caption', 'props': [('font-size', '16px'), ('text-align', 'center')]}]
+))
+
+
+=======================================================================================================================
+Ex 12:Implement the CartPole problem using reinforcement learning.
+cartpole
+
+import gym
+import numpy as np
+import random
+import math
+import matplotlib.pyplot as plt
+
+# Initialize environment and hyperparameters
+env = gym.make("CartPole-v1")
+lr = 0.1              # Learning rate
+discount = 0.99       # Discount factor
+eps = 1.0             # Starting epsilon (exploration rate)
+eps_decay = 0.995     # Epsilon decay rate
+eps_min = 0.01        # Minimum epsilon
+episodes = 1000       # Total training episodes
+steps = 100           # Max steps per episode
+
+# Define bins for discretizing the continuous state space
+bins = [20, 20, 50, 50]
+low = [env.observation_space.low[0], -0.5, env.observation_space.low[2], -math.radians(50)]
+high = [env.observation_space.high[0], 0.5, env.observation_space.high[2], math.radians(50)]
+
+# Initialize Q-table with zeros
+q_table = np.zeros(bins + [env.action_space.n])
+
+# Function to discretize continuous state space
+def discretize(state):
+    return tuple(int(np.clip((state[i] - low[i]) / (high[i] - low[i]) * (b - 1), 0, b - 1)) for i, b in enumerate(bins))
+
+# Tracking rewards for visualization
+episode_rewards = []
+
+# Q-learning main loop
+for ep in range(episodes):
+    initial_state = env.reset()
+    state = discretize(initial_state if isinstance(initial_state, np.ndarray) else initial_state[0])
+    total_reward = 0  # Track total reward per episode
+
+    for _ in range(steps):
+        # Select action with epsilon-greedy policy
+        if random.uniform(0, 1) < eps:
+            action = env.action_space.sample()  # Exploration
+        else:
+            action = np.argmax(q_table[state])  # Exploitation
+
+        # Perform action
+        next_state, reward, done, _ = env.step(action)
+        next_state = discretize(next_state)
+
+        # Q-learning update rule
+        q_table[state + (action,)] += lr * (reward + discount * np.max(q_table[next_state]) - q_table[state + (action,)])
+
+        state = next_state
+        total_reward += reward  # Accumulate reward
+
+        if done:
+            break
+
+    # Reduce epsilon to decrease exploration over time
+    eps = max(eps_min, eps * eps_decay)
+    episode_rewards.append(total_reward)  # Track total reward per episode
+
+    # Print progress every 100 episodes
+    if ep % 100 == 0:
+        print(f"Episode: {ep}, Total Reward: {total_reward}")
+
+# Close environment
+env.close()
+
+# Plot episode rewards to visualize performance
+plt.plot(episode_rewards)
+plt.xlabel('Episode')
+plt.ylabel('Total Reward')
+plt.title('Q-learning Performance on CartPole-v1')
+plt.show()
